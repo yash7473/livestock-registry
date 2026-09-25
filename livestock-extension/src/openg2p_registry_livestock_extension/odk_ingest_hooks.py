@@ -675,55 +675,6 @@ def _alias_extension_submodules():
             sys.modules[target_name] = sys.modules[mod_name]
 
 
-def _wrap_domain_service_validations():
-    """Wrap validate_domain_attributes and post_intake_upsert across all livestock domain services."""
-    _alias_extension_submodules()
-    try:
-        import importlib
-        import inspect
-
-        service_modules = []
-        for mod_path in (
-            "openg2p_registry_livestock_extension.register_domain.services",
-            "openg2p_registry_extensions.register_domain.services",
-        ):
-            try:
-                service_modules.append(importlib.import_module(mod_path))
-            except Exception:
-                pass
-
-        for sm in service_modules:
-            for name, cls in inspect.getmembers(sm, inspect.isclass):
-                if hasattr(cls, "validate_domain_attributes"):
-                    orig_vda = cls.validate_domain_attributes
-                    if not getattr(orig_vda, "_ls_safe", False):
-                        def _make_safe_vda(orig):
-                            async def safe_vda(self, records: list[dict], *args, **kwargs):
-                                try:
-                                    return await orig(self, records, *args, **kwargs)
-                                except Exception as ex:
-                                    _logger.warning("ODK Hook: Suppressed domain validation in %s: %s", self.__class__.__name__, ex)
-                            safe_vda._ls_safe = True
-                            return safe_vda
-                        cls.validate_domain_attributes = _make_safe_vda(orig_vda)
-
-                if hasattr(cls, "post_intake_upsert"):
-                    orig_piu = cls.post_intake_upsert
-                    if not getattr(orig_piu, "_ls_safe", False):
-                        def _make_safe_piu(orig):
-                            async def safe_piu(self, rows: list, session, *args, **kwargs):
-                                try:
-                                    return await orig(self, rows, session, *args, **kwargs)
-                                except Exception as ex:
-                                    _logger.warning("ODK Hook: Suppressed post_intake_upsert in %s: %s", self.__class__.__name__, ex)
-                            safe_piu._ls_safe = True
-                            return safe_piu
-                        cls.post_intake_upsert = _make_safe_piu(orig_piu)
-        _logger.info("ODK Hook: Successfully wrapped validate_domain_attributes and post_intake_upsert on all services")
-    except Exception as e:
-        _logger.warning("ODK Hook: Could not wrap domain service validations: %s", e)
-
-
 def _ensure_domain_factory_initialized():
     """Ensure livestock domain factory, template helper, and services are initialized in BaseComponent registry."""
     try:
@@ -792,174 +743,6 @@ def _ensure_domain_factory_initialized():
             _logger.info("ODK Hook: Successfully initialized livestock Initializer and domain services")
     except Exception as e:
         _logger.warning("ODK Hook: Could not initialize domain factory: %s", e)
-
-    _wrap_domain_service_validations()
-
-    # Wrap domain validations dynamically so existing files do not need modification
-    import importlib
-
-    try:
-        dvu = importlib.import_module("openg2p_registry_livestock_extension.register_domain.services.domain_validation_utils")
-
-        async def _safe_gsc(species_value_id: str | None) -> tuple[bool, bool]:
-            requires_ear_tag, is_flock_species = True, False
-            if not species_value_id:
-                return requires_ear_tag, is_flock_species
-            s = str(species_value_id).upper()
-            if any(x in s for x in ("POULTRY", "CHICKEN", "BEE", "FLOCK")):
-                requires_ear_tag = False
-                is_flock_species = True
-            return requires_ear_tag, is_flock_species
-
-        try:
-            dvu.get_species_config.__code__ = _safe_gsc.__code__
-        except Exception:
-            dvu.get_species_config = _safe_gsc
-
-        async def _safe_vsm(record: dict) -> None:
-            pass
-
-        try:
-            dvu.validate_species_matches.__code__ = _safe_vsm.__code__
-        except Exception:
-            dvu.validate_species_matches = _safe_vsm
-
-        async def _safe_eetbts(rows: list) -> None:
-            pass
-
-        try:
-            dvu.ensure_ear_tags_belong_to_submission.__code__ = _safe_eetbts.__code__
-        except Exception:
-            dvu.ensure_ear_tags_belong_to_submission = _safe_eetbts
-
-        async def _safe_ete(*args, **kwargs) -> bool:
-            return True
-
-        try:
-            dvu.ear_tag_exists.__code__ = _safe_ete.__code__
-        except Exception:
-            dvu.ear_tag_exists = _safe_ete
-
-        async def _safe_ear(*args, **kwargs) -> bool:
-            return False
-
-        try:
-            dvu.event_already_recorded.__code__ = _safe_ear.__code__
-        except Exception:
-            dvu.event_already_recorded = _safe_ear
-
-        def _safe_ve(message: str = "", *args, **kwargs) -> None:
-            import logging
-            msg = message or (args[0] if args else "") or kwargs.get("msg") or kwargs.get("message") or ""
-            logging.getLogger("openg2p.odk_ingest_hooks").warning("ODK Hook: Suppressed domain validation error: %s", msg)
-
-        dvu._logger = logging.getLogger("openg2p.odk_ingest_hooks")
-        try:
-            dvu.validation_error.__code__ = _safe_ve.__code__
-        except Exception:
-            dvu.validation_error = _safe_ve
-
-        # Patch validation_error and related checks on all domain service modules
-        for _svc_mod_name in (
-            "g2p_register_domain_service_animal",
-            "g2p_register_domain_service_breeding",
-            "g2p_register_domain_service_farmer",
-            "g2p_register_domain_service_health_event",
-            "g2p_register_domain_service_import_batch",
-            "g2p_register_domain_service_livestock",
-            "g2p_register_domain_service_vaccination",
-            "g2p_register_domain_service_vaccine_schedule",
-            "g2p_register_domain_service_vital_event",
-        ):
-            try:
-                _sm = importlib.import_module(f"openg2p_registry_livestock_extension.register_domain.services.{_svc_mod_name}")
-                _sm.validation_error = _safe_ve
-                _sm._logger = logging.getLogger("openg2p.odk_ingest_hooks")
-                if hasattr(_sm, "validate_species_matches"):
-                    _sm.validate_species_matches = _safe_vsm
-                if hasattr(_sm, "get_species_config"):
-                    _sm.get_species_config = _safe_gsc
-                if hasattr(_sm, "ear_tag_exists"):
-                    _sm.ear_tag_exists = _safe_ete
-                if hasattr(_sm, "ensure_ear_tags_belong_to_submission"):
-                    _sm.ensure_ear_tags_belong_to_submission = _safe_eetbts
-            except Exception as _ex_sm:
-                _logger.debug("Could not patch validation on %s: %s", _svc_mod_name, _ex_sm)
-    except Exception as e:
-        _logger.warning("ODK Hook: Could not wrap validate_species_matches/get_species_config: %s", e)
-
-    try:
-        animal_mod = importlib.import_module("openg2p_registry_livestock_extension.register_domain.services.g2p_register_domain_service_animal")
-        if hasattr(animal_mod, "get_species_config"):
-            animal_mod.get_species_config = _safe_gsc
-        cls_animal = animal_mod.G2PRegisterDomainServiceAnimal
-        if hasattr(cls_animal, "_validate_no_duplicate_ear_tags") and not hasattr(cls_animal._validate_no_duplicate_ear_tags, "_ls_wrapped"):
-            _orig_vndet = cls_animal._validate_no_duplicate_ear_tags
-            async def _safe_vndet(self, ear_tag_id, species, breed, self_ids, self_refs):
-                try:
-                    await _orig_vndet(self, ear_tag_id, species, breed, self_ids, self_refs)
-                except Exception as ex:
-                    _logger.warning("ODK Hook: Suppressed animal duplicate ear tag: %s", ex)
-            _safe_vndet._ls_wrapped = True
-            cls_animal._validate_no_duplicate_ear_tags = _safe_vndet
-    except Exception as e:
-        _logger.warning("ODK Hook: Could not wrap _validate_no_duplicate_ear_tags: %s", e)
-
-    try:
-        breeding_mod = importlib.import_module("openg2p_registry_livestock_extension.register_domain.services.g2p_register_domain_service_breeding")
-        cls_breeding = breeding_mod.G2PRegisterDomainServiceBreeding
-        if hasattr(cls_breeding, "_raise_duplicate_breeding_error") and not hasattr(cls_breeding._raise_duplicate_breeding_error, "_ls_wrapped"):
-            def _safe_rdbe(self, event_type: str) -> None:
-                _logger.warning("ODK Hook: Suppressed duplicate breeding event: %s", event_type)
-            _safe_rdbe._ls_wrapped = True
-            cls_breeding._raise_duplicate_breeding_error = _safe_rdbe
-    except Exception as e:
-        _logger.warning("ODK Hook: Could not wrap _raise_duplicate_breeding_error: %s", e)
-
-    try:
-        health_mod = importlib.import_module("openg2p_registry_livestock_extension.register_domain.services.g2p_register_domain_service_health_event")
-        cls_health = health_mod.G2PRegisterDomainServiceHealthEvent
-        if hasattr(cls_health, "_validate_no_duplicate_health_event") and not hasattr(cls_health._validate_no_duplicate_health_event, "_ls_wrapped"):
-            _orig_vndhe = cls_health._validate_no_duplicate_health_event
-            async def _safe_vndhe(self, ear_tag_id, event_type, onset, self_ids, self_refs):
-                try:
-                    await _orig_vndhe(self, ear_tag_id, event_type, onset, self_ids, self_refs)
-                except Exception as ex:
-                    _logger.warning("ODK Hook: Suppressed duplicate health event: %s", ex)
-            _safe_vndhe._ls_wrapped = True
-            cls_health._validate_no_duplicate_health_event = _safe_vndhe
-    except Exception as e:
-        _logger.warning("ODK Hook: Could not wrap _validate_no_duplicate_health_event: %s", e)
-
-    try:
-        vacc_mod = importlib.import_module("openg2p_registry_livestock_extension.register_domain.services.g2p_register_domain_service_vaccination")
-        cls_vacc = vacc_mod.G2PRegisterDomainServiceVaccination
-        if hasattr(cls_vacc, "_validate_no_duplicate_vaccination") and not hasattr(cls_vacc._validate_no_duplicate_vaccination, "_ls_wrapped"):
-            _orig_vndv = cls_vacc._validate_no_duplicate_vaccination
-            async def _safe_vndv(self, ear_tag_id, vaccine_type, on, self_ids, self_refs):
-                try:
-                    await _orig_vndv(self, ear_tag_id, vaccine_type, on, self_ids, self_refs)
-                except Exception as ex:
-                    _logger.warning("ODK Hook: Suppressed duplicate vaccination: %s", ex)
-            _safe_vndv._ls_wrapped = True
-            cls_vacc._validate_no_duplicate_vaccination = _safe_vndv
-    except Exception as e:
-        _logger.warning("ODK Hook: Could not wrap _validate_no_duplicate_vaccination: %s", e)
-
-    try:
-        vital_mod = importlib.import_module("openg2p_registry_livestock_extension.register_domain.services.g2p_register_domain_service_vital_event")
-        cls_vital = vital_mod.G2PRegisterDomainServiceVitalEvent
-        if hasattr(cls_vital, "_validate_no_duplicate_vital_event") and not hasattr(cls_vital._validate_no_duplicate_vital_event, "_ls_wrapped"):
-            _orig_vndve = cls_vital._validate_no_duplicate_vital_event
-            async def _safe_vndve(self, records: list[dict]) -> None:
-                try:
-                    await _orig_vndve(self, records)
-                except Exception as ex:
-                    _logger.warning("ODK Hook: Suppressed duplicate vital event: %s", ex)
-            _safe_vndve._ls_wrapped = True
-            cls_vital._validate_no_duplicate_vital_event = _safe_vndve
-    except Exception as e:
-        _logger.warning("ODK Hook: Could not wrap _validate_no_duplicate_vital_event: %s", e)
 
 
 def _patch_celery_transformation_worker():
@@ -1032,26 +815,6 @@ def _patch_celery_ingest_worker():
         sys.modules["openg2p_registry_extensions"] = openg2p_registry_livestock_extension
         import openg2p_registry_livestock_extension.config
         sys.modules["openg2p_registry_extensions.config"] = openg2p_registry_livestock_extension.config
-
-        # 1. Patch application_reference generation to avoid unique constraint collisions
-        try:
-            import openg2p_registry_core.helpers.application_reference_generator as arg_mod
-            if not hasattr(arg_mod, "_ls_orig_gar"):
-                _orig_gar = arg_mod.generate_application_reference
-                arg_mod._ls_orig_gar = _orig_gar
-
-                def _safe_gar(now=None):
-                    base = _orig_gar(now)
-                    return f"{base}-{uuid.uuid4().hex[:4].upper()}"
-
-                arg_mod.generate_application_reference = _safe_gar
-                _logger.info("ODK Hook: Successfully patched generate_application_reference")
-
-            import openg2p_registry_core.models.g2p_intake_form as form_mod
-            if hasattr(form_mod, "_default_application_reference"):
-                form_mod._default_application_reference = arg_mod.generate_application_reference
-        except Exception as err_gar:
-            _logger.warning("ODK Hook: Could not patch application_reference generator: %s", err_gar)
 
         # 2. Patch G2PIntakeFormDataService._insert_live_register_row to sanitize enums and enrich livestock/child records
         try:
@@ -1309,7 +1072,7 @@ def _patch_celery_ingest_worker():
                     else:
                         _ensure_dbengine_initialized()
                     _ensure_domain_factory_initialized()
-                    _wrap_domain_service_validations()
+                    pass  # domain validations are no longer wrapped: they must raise
                 except Exception as ex_init:
                     _logger.warning("ODK Hook: Error during save initialization: %s", ex_init)
 

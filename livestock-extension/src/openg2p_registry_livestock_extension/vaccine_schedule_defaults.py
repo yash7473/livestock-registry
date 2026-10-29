@@ -12,8 +12,9 @@ extension's migration, right after the table is created.
 A default is added only when no row exists for its vaccine and species, active
 or not: an interval changed or switched off on an environment is kept as is.
 The Vaccine Schedule form saves attribute value ids (VACCINE_TYPE_ANTHRAX_CATTLE,
-LIVESTOCK_SPECIES_CATTLE) while these defaults use the bare codes, so the
-existence check strips the prefixes before comparing, as the lookup does.
+species LSTK_CATTLE, or a former LIVESTOCK_SPECIES_CATTLE) while these defaults
+use the bare codes, so the existence check strips the prefixes before
+comparing (and reads chicken as poultry), as the lookup does.
 """
 
 import logging
@@ -23,8 +24,8 @@ from sqlalchemy import text
 _logger = logging.getLogger(__name__)
 
 # (vaccine_name, species, interval_days, notes). vaccine_name and species are
-# the bare codes the schedule lookup compares (VACCINE_TYPE_ / LIVESTOCK_SPECIES_
-# prefixes are stripped on both sides).
+# the bare codes the schedule lookup compares (VACCINE_TYPE_ / LIVESTOCK_SPECIES_ /
+# LSTK_ prefixes are stripped on both sides).
 DEFAULT_SCHEDULES = [
     ("ANTHRAX_CATTLE", "CATTLE", 365, "Annual, ahead of the main rains."),
     ("ANTHRAX_CAMEL", "CAMEL", 365, None),
@@ -50,7 +51,7 @@ _INSERT = text(
     WHERE NOT EXISTS (
         SELECT 1 FROM g2p_register_vaccine_schedules
         WHERE regexp_replace(upper(vaccine_name), '^(VACCINE_TYPE_|LIVESTOCK_VACCINE_)', '') = CAST(:vaccine AS VARCHAR)
-          AND regexp_replace(upper(species), '^LIVESTOCK_SPECIES_', '') = CAST(:species AS VARCHAR)
+          AND regexp_replace(regexp_replace(upper(species), '^(LIVESTOCK_SPECIES_|LSTK_)', ''), '^CHICKEN$', 'POULTRY') = CAST(:species AS VARCHAR)
     )
     """
 )

@@ -67,24 +67,34 @@
 {% endif %}
 
 
+{# Form species choice -> LIVESTOCK_TYPE code (Master Data, the Gen1 livestock
+   types). former_species reads a submission that still carries the
+   registry's former codes (LIVESTOCK_SPECIES_*). Pig and beehive are not
+   livestock types and fall through as unknown. #}
 {% set species_map = {
-  'cattle': 'LIVESTOCK_SPECIES_CATTLE',
-  'cow': 'LIVESTOCK_SPECIES_CATTLE',
-  'bovine': 'LIVESTOCK_SPECIES_CATTLE',
-  'sheep': 'LIVESTOCK_SPECIES_SHEEP',
-  'ovine': 'LIVESTOCK_SPECIES_SHEEP',
-  'goat': 'LIVESTOCK_SPECIES_GOAT',
-  'caprine': 'LIVESTOCK_SPECIES_GOAT',
-  'camel': 'LIVESTOCK_SPECIES_CAMEL',
-  'donkey': 'LIVESTOCK_SPECIES_DONKEY',
-  'horse': 'LIVESTOCK_SPECIES_HORSE',
-  'mule': 'LIVESTOCK_SPECIES_MULE',
-  'poultry': 'LIVESTOCK_SPECIES_POULTRY',
-  'chicken': 'LIVESTOCK_SPECIES_POULTRY',
-  'pig': 'LIVESTOCK_SPECIES_PIG',
-  'swine': 'LIVESTOCK_SPECIES_PIG',
-  'beehive': 'LIVESTOCK_SPECIES_BEEHIVE',
-  'bee': 'LIVESTOCK_SPECIES_BEEHIVE'
+  'cattle': 'LSTK_CATTLE',
+  'cow': 'LSTK_CATTLE',
+  'bovine': 'LSTK_CATTLE',
+  'sheep': 'LSTK_SHEEP',
+  'ovine': 'LSTK_SHEEP',
+  'goat': 'LSTK_GOAT',
+  'caprine': 'LSTK_GOAT',
+  'camel': 'LSTK_CAMEL',
+  'donkey': 'LSTK_DONKEY',
+  'horse': 'LSTK_HORSE',
+  'mule': 'LSTK_MULE',
+  'poultry': 'LSTK_CHICKEN',
+  'chicken': 'LSTK_CHICKEN'
+} %}
+{% set former_species = {
+  'LIVESTOCK_SPECIES_CATTLE': 'LSTK_CATTLE',
+  'LIVESTOCK_SPECIES_SHEEP': 'LSTK_SHEEP',
+  'LIVESTOCK_SPECIES_GOAT': 'LSTK_GOAT',
+  'LIVESTOCK_SPECIES_CAMEL': 'LSTK_CAMEL',
+  'LIVESTOCK_SPECIES_DONKEY': 'LSTK_DONKEY',
+  'LIVESTOCK_SPECIES_HORSE': 'LSTK_HORSE',
+  'LIVESTOCK_SPECIES_MULE': 'LSTK_MULE',
+  'LIVESTOCK_SPECIES_POULTRY': 'LSTK_CHICKEN'
 } %}
 
 {# Form `disease` choice (choices sheet of livestock_registry.xlsx) -> registry
@@ -181,57 +191,53 @@
     }
   ],
 {# A missing species stays empty (the registry then refuses the record) and an
-   unknown one is passed on as LIVESTOCK_SPECIES_<NAME> (refused by the code-list
+   unknown one is passed on as LSTK_<NAME> (refused by the code-list
    check); neither is turned into Cattle any more. #}
   "ls_animal_details": [
     {% for a in livestock_list %}
     {% set a_sp_raw = ((a.get('species_id') or a.get('species') or '') | string) | lower | trim %}
-    {% set a_sp = (species_map.get(a_sp_raw, ('LIVESTOCK_SPECIES_' ~ a_sp_raw | upper) if not a_sp_raw.startswith('livestock_species_') else (a_sp_raw | upper))) if a_sp_raw else none %}
+    {% set a_sp = (species_map.get(a_sp_raw) or ((a_sp_raw | upper) if a_sp_raw.startswith('lstk_') else former_species.get(a_sp_raw | upper, 'LSTK_' ~ (a_sp_raw | upper)))) if a_sp_raw else none %}
     {% set a_br_raw = ((a.get('breed') or '') | string) | lower | trim %}
-    {% set a_br = a_br_raw %}
-    {% if a_sp == 'LIVESTOCK_SPECIES_GOAT' %}
-      {% if 'begait' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_BEGAIT_GOAT' %}
-      {% elif 'abergelle' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_ABERGELLE' %}
-      {% elif 'afar' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_AFAR_GOAT' %}
-      {% elif 'boer' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_BOER_CROSS' %}
-      {% elif 'central' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_CENTRAL_HIGHLAND' %}
-      {% elif 'somali' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_LONG_EARED_SOMALI' %}
-      {% elif 'woito' in a_br_raw or 'guji' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_WOITO_GUJI' %}
-      {% elif 'local' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_LOCAL_GOAT' %}
-      {% elif a_br_raw.startswith('livestock_breed_') %}{% set a_br = a_br_raw | upper %}
-      {% else %}{% set a_br = a.get('breed') %}
+    {# Form breed text -> LIVESTOCK_BREED_NAME code (Master Data, the MoA
+       national livestock data standard). A breed code is passed on as is; a
+       breed the list does not have (e.g. "local") is passed on as typed and
+       refused by the breed check, so the enumerator's entry is never guessed. #}
+    {% set a_br = a.get('breed') %}
+    {% if a_br_raw.startswith('breed_') %}{% set a_br = a_br_raw | upper %}
+    {% elif a_sp == 'LSTK_GOAT' %}
+      {% if 'begait' in a_br_raw or 'begayit' in a_br_raw %}{% set a_br = 'BREED_GOAT_BEGAYIT' %}
+      {% elif 'abergel' in a_br_raw %}{% set a_br = 'BREED_GOAT_ABERGELE' %}
+      {% elif 'afar' in a_br_raw %}{% set a_br = 'BREED_GOAT_AFAR' %}
+      {% elif 'boer' in a_br_raw %}{% set a_br = 'BREED_GOAT_BOER' %}
+      {% elif 'central' in a_br_raw %}{% set a_br = 'BREED_GOAT_CENTRAL_HIGHLAND' %}
+      {% elif 'short' in a_br_raw and 'somali' in a_br_raw %}{% set a_br = 'BREED_GOAT_SHORT_EARED_SOMALI' %}
+      {% elif 'somali' in a_br_raw %}{% set a_br = 'BREED_GOAT_LONG_EARED_SOMALI' %}
+      {% elif 'woito' in a_br_raw or 'woyito' in a_br_raw or 'guji' in a_br_raw %}{% set a_br = 'BREED_GOAT_WOYITO_GUJI' %}
       {% endif %}
-    {% elif a_sp == 'LIVESTOCK_SPECIES_SHEEP' %}
-      {% if 'menz' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_MENZ' %}
-      {% elif 'afar' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_AFAR_SHEEP' %}
-      {% elif 'blackhead' in a_br_raw or 'somali' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_BLACKHEAD_SOMALI' %}
-      {% elif 'horro' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_HORRO_SHEEP' %}
-      {% elif 'bonga' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_BONGA' %}
-      {% elif 'washera' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_WASHERA' %}
-      {% elif 'dorper' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_DORPER_CROSS' %}
-      {% elif 'local' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_LOCAL_SHEEP' %}
-      {% elif a_br_raw.startswith('livestock_breed_') %}{% set a_br = a_br_raw | upper %}
-      {% else %}{% set a_br = a.get('breed') %}
+    {% elif a_sp == 'LSTK_SHEEP' %}
+      {% if 'menz' in a_br_raw and 'dorper' in a_br_raw %}{% set a_br = 'BREED_SHEEP_DORPER_X_MENZ' %}
+      {% elif 'dorper' in a_br_raw and ('cross' in a_br_raw or ' x ' in a_br_raw) %}{% set a_br = 'BREED_SHEEP_DORPER_X_MENZ' %}
+      {% elif 'dorper' in a_br_raw %}{% set a_br = 'BREED_SHEEP_DORPER' %}
+      {% elif 'menz' in a_br_raw %}{% set a_br = 'BREED_SHEEP_MENZ' %}
+      {% elif 'afar' in a_br_raw %}{% set a_br = 'BREED_SHEEP_AFAR' %}
+      {% elif 'blackhead' in a_br_raw or 'black head' in a_br_raw or 'somali' in a_br_raw %}{% set a_br = 'BREED_SHEEP_BLACK_HEAD_SOMALI' %}
+      {% elif 'horro' in a_br_raw %}{% set a_br = 'BREED_SHEEP_HORRO' %}
+      {% elif 'bonga' in a_br_raw %}{% set a_br = 'BREED_SHEEP_BONGA' %}
+      {% elif 'arsi' in a_br_raw %}{% set a_br = 'BREED_SHEEP_ARSI' %}
+      {% elif 'begait' in a_br_raw or 'begayit' in a_br_raw %}{% set a_br = 'BREED_SHEEP_BEGAYIT' %}
       {% endif %}
-    {% elif a_sp == 'LIVESTOCK_SPECIES_CATTLE' %}
-      {% if 'begait' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_BEGAIT' %}
-      {% elif 'boran' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_BORAN' %}
-      {% elif 'fogera' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_FOGERA' %}
-      {% elif 'horro' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_HORRO' %}
-      {% elif 'sheko' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_SHEKO' %}
-      {% elif 'arsi' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_ARSI' %}
-      {% elif 'barka' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_BARKA' %}
-      {% elif 'holstein' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_HOLSTEIN_CROSS' %}
-      {% elif 'jersey' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_JERSEY_CROSS' %}
-      {% elif 'zebu' in a_br_raw or 'local' in a_br_raw %}{% set a_br = 'LIVESTOCK_BREED_LOCAL_ZEBU' %}
-      {% elif a_br_raw.startswith('livestock_breed_') %}{% set a_br = a_br_raw | upper %}
-      {% else %}{% set a_br = a.get('breed') %}
-      {% endif %}
-    {% else %}
-      {% if a_br_raw.startswith('livestock_breed_') %}
-        {% set a_br = a_br_raw | upper %}
-      {% else %}
-        {% set a_br = a.get('breed') %}
+    {% elif a_sp == 'LSTK_CATTLE' %}
+      {% if 'holstein' in a_br_raw and 'horro' in a_br_raw %}{% set a_br = 'BREED_CATTLE_HOLSTEIN_FRIESIAN_X_HORRO' %}
+      {% elif 'holstein' in a_br_raw %}{% set a_br = 'BREED_CATTLE_HOLSTEIN_FRIESIAN' %}
+      {% elif 'jersey' in a_br_raw and 'arsi' in a_br_raw %}{% set a_br = 'BREED_CATTLE_JERSEY_X_ARSI' %}
+      {% elif 'jersey' in a_br_raw and 'horro' in a_br_raw %}{% set a_br = 'BREED_CATTLE_JERSEY_X_HORRO' %}
+      {% elif 'jersey' in a_br_raw %}{% set a_br = 'BREED_CATTLE_JERSEY' %}
+      {% elif 'begait' in a_br_raw or 'barka' in a_br_raw %}{% set a_br = 'BREED_CATTLE_BEGAIT' %}
+      {% elif 'boran' in a_br_raw %}{% set a_br = 'BREED_CATTLE_BORAN' %}
+      {% elif 'fogera' in a_br_raw %}{% set a_br = 'BREED_CATTLE_FOGERA' %}
+      {% elif 'horro' in a_br_raw %}{% set a_br = 'BREED_CATTLE_HORRO' %}
+      {% elif 'sheko' in a_br_raw %}{% set a_br = 'BREED_CATTLE_SHEKO' %}
+      {% elif 'arsi' in a_br_raw %}{% set a_br = 'BREED_CATTLE_ARSI' %}
       {% endif %}
     {% endif %}
     {
@@ -255,7 +261,7 @@
     {% set ns = namespace(items=[]) %}
     {% for a in livestock_list %}
       {% set a_sp_raw = ((a.get('species_id') or a.get('species') or '') | string) | lower | trim %}
-      {% set a_sp = (species_map.get(a_sp_raw, ('LIVESTOCK_SPECIES_' ~ a_sp_raw | upper) if not a_sp_raw.startswith('livestock_species_') else (a_sp_raw | upper))) if a_sp_raw else none %}
+      {% set a_sp = (species_map.get(a_sp_raw) or ((a_sp_raw | upper) if a_sp_raw.startswith('lstk_') else former_species.get(a_sp_raw | upper, 'LSTK_' ~ (a_sp_raw | upper)))) if a_sp_raw else none %}
       {% for he in a.get('health_events', []) %}
         {% set raw_loc = ((he.get('location') or 'FIELD') | string) | upper %}
         {% set _ = ns.items.append({
@@ -284,7 +290,7 @@
     {% set ns = namespace(items=[]) %}
     {% for a in livestock_list %}
       {% set a_sp_raw = ((a.get('species_id') or a.get('species') or '') | string) | lower | trim %}
-      {% set a_sp = (species_map.get(a_sp_raw, ('LIVESTOCK_SPECIES_' ~ a_sp_raw | upper) if not a_sp_raw.startswith('livestock_species_') else (a_sp_raw | upper))) if a_sp_raw else none %}
+      {% set a_sp = (species_map.get(a_sp_raw) or ((a_sp_raw | upper) if a_sp_raw.startswith('lstk_') else former_species.get(a_sp_raw | upper, 'LSTK_' ~ (a_sp_raw | upper)))) if a_sp_raw else none %}
       {% for v in a.get('vaccinations', []) %}
         {% set raw_v = ((v.get('vaccine_type') or v.get('vaccine') or v.get('type') or 'ROUTINE') | string) | lower | trim %}
         {% set v_type = raw_v %}
@@ -297,21 +303,21 @@
         {% elif 'camel_pasteurellosis' in raw_v %}
           {% set v_type = 'VACCINE_TYPE_PASTEURELLOSIS_CAMEL' %}
         {% elif 'pasteurellosis' in raw_v %}
-          {% if a_sp == 'LIVESTOCK_SPECIES_GOAT' %}
+          {% if a_sp == 'LSTK_GOAT' %}
             {% set v_type = 'VACCINE_TYPE_PASTEURELLOSIS_GOAT' %}
-          {% elif a_sp == 'LIVESTOCK_SPECIES_SHEEP' %}
+          {% elif a_sp == 'LSTK_SHEEP' %}
             {% set v_type = 'VACCINE_TYPE_PASTEURELLOSIS_SHEEP' %}
-          {% elif a_sp == 'LIVESTOCK_SPECIES_CAMEL' %}
+          {% elif a_sp == 'LSTK_CAMEL' %}
             {% set v_type = 'VACCINE_TYPE_PASTEURELLOSIS_CAMEL' %}
           {% else %}
             {% set v_type = 'VACCINE_TYPE_PASTEURELLOSIS_CATTLE' %}
           {% endif %}
         {% elif 'anthrax' in raw_v %}
-          {% if a_sp == 'LIVESTOCK_SPECIES_GOAT' %}
+          {% if a_sp == 'LSTK_GOAT' %}
             {% set v_type = 'VACCINE_TYPE_ANTHRAX_GOAT' %}
-          {% elif a_sp == 'LIVESTOCK_SPECIES_SHEEP' %}
+          {% elif a_sp == 'LSTK_SHEEP' %}
             {% set v_type = 'VACCINE_TYPE_ANTHRAX_SHEEP' %}
-          {% elif a_sp == 'LIVESTOCK_SPECIES_CAMEL' %}
+          {% elif a_sp == 'LSTK_CAMEL' %}
             {% set v_type = 'VACCINE_TYPE_ANTHRAX_CAMEL' %}
           {% else %}
             {% set v_type = 'VACCINE_TYPE_ANTHRAX_CATTLE' %}
@@ -332,11 +338,11 @@
         {% elif 'brucellosis' in raw_v %}
           {% set v_type = 'VACCINE_TYPE_BRUCELLOSIS_S19' %}
         {% elif 'rabies' in raw_v %}
-          {% set v_type = 'VACCINE_TYPE_RABIES_DONKEY' if a_sp == 'LIVESTOCK_SPECIES_DONKEY' else 'VACCINE_TYPE_RABIES_CATTLE' %}
+          {% set v_type = 'VACCINE_TYPE_RABIES_DONKEY' if a_sp == 'LSTK_DONKEY' else 'VACCINE_TYPE_RABIES_CATTLE' %}
         {% elif 'ppr' in raw_v or 'peste_des_petits' in raw_v %}
-          {% set v_type = 'VACCINE_TYPE_PPR_SHEEP' if a_sp == 'LIVESTOCK_SPECIES_SHEEP' else 'VACCINE_TYPE_PPR_GOAT' %}
+          {% set v_type = 'VACCINE_TYPE_PPR_SHEEP' if a_sp == 'LSTK_SHEEP' else 'VACCINE_TYPE_PPR_GOAT' %}
         {% elif 'sgp' in raw_v or 'sheep_and_goat_pox' in raw_v %}
-          {% set v_type = 'VACCINE_TYPE_SGP_SHEEP' if a_sp == 'LIVESTOCK_SPECIES_SHEEP' else 'VACCINE_TYPE_SGP_GOAT' %}
+          {% set v_type = 'VACCINE_TYPE_SGP_SHEEP' if a_sp == 'LSTK_SHEEP' else 'VACCINE_TYPE_SGP_GOAT' %}
         {% elif 'enterotoxaemia' in raw_v %}
           {% set v_type = 'VACCINE_TYPE_ENTEROTOXAEMIA' %}
         {% elif 'camel_pox' in raw_v %}
@@ -352,7 +358,7 @@
         {% elif 'marek' in raw_v %}
           {% set v_type = 'VACCINE_TYPE_MAREK' %}
         {% elif 'ahs' in raw_v or 'african_horse' in raw_v %}
-          {% set v_type = 'VACCINE_TYPE_AHS_DONKEY' if a_sp == 'LIVESTOCK_SPECIES_DONKEY' else 'VACCINE_TYPE_AHS' %}
+          {% set v_type = 'VACCINE_TYPE_AHS_DONKEY' if a_sp == 'LSTK_DONKEY' else 'VACCINE_TYPE_AHS' %}
         {% elif 'tetanus' in raw_v %}
           {% set v_type = 'VACCINE_TYPE_TETANUS_HORSE' %}
         {% elif raw_v in ['routine', ''] %}
@@ -382,7 +388,7 @@
     {% set ns = namespace(items=[]) %}
     {% for a in livestock_list %}
       {% set a_sp_raw = ((a.get('species_id') or a.get('species') or '') | string) | lower | trim %}
-      {% set a_sp = (species_map.get(a_sp_raw, ('LIVESTOCK_SPECIES_' ~ a_sp_raw | upper) if not a_sp_raw.startswith('livestock_species_') else (a_sp_raw | upper))) if a_sp_raw else none %}
+      {% set a_sp = (species_map.get(a_sp_raw) or ((a_sp_raw | upper) if a_sp_raw.startswith('lstk_') else former_species.get(a_sp_raw | upper, 'LSTK_' ~ (a_sp_raw | upper)))) if a_sp_raw else none %}
       {# offspring_gender comes from the form's Birth group (sex_of_offspring);
          no silent default — a BIRTH without it is rejected by the vital-event
          validation, like a staff entry would be. #}
@@ -423,7 +429,7 @@
     {% set ns = namespace(items=[]) %}
     {% for a in livestock_list %}
       {% set a_sp_raw = ((a.get('species_id') or a.get('species') or '') | string) | lower | trim %}
-      {% set a_sp = (species_map.get(a_sp_raw, ('LIVESTOCK_SPECIES_' ~ a_sp_raw | upper) if not a_sp_raw.startswith('livestock_species_') else (a_sp_raw | upper))) if a_sp_raw else none %}
+      {% set a_sp = (species_map.get(a_sp_raw) or ((a_sp_raw | upper) if a_sp_raw.startswith('lstk_') else former_species.get(a_sp_raw | upper, 'LSTK_' ~ (a_sp_raw | upper)))) if a_sp_raw else none %}
       {% for be in a.get('breeding_events', []) %}
         {% set ai = be.get('artificial_insemination_tab', {}) or {} %}
         {% set raw_et = ((be.get('event_type') or be.get('breeding_event_type') or 'NATURAL') | string) | upper %}

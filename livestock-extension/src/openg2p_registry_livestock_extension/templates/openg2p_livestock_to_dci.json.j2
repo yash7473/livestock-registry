@@ -2,9 +2,9 @@
 {{- (value or '') | string | trim | upper -}}
 {%- endmacro -%}
 
-{#- A code-list value id as a label: LIVESTOCK_SPECIES_CATTLE -> Cattle. -#}
+{#- A code-list value id as a label: LSTK_CATTLE or a former LIVESTOCK_SPECIES_CATTLE -> Cattle, BREED_CATTLE_BORAN -> Boran. -#}
 {%- macro title(value) -%}
-{{- (value or '') | string | trim | replace('LIVESTOCK_SPECIES_', '') | replace('LIVESTOCK_BREED_', '') | replace('LIVESTOCK_DISEASE_', '') | replace('VACCINE_TYPE_', '') | replace('_', ' ') | title -}}
+{{- (value or '') | string | trim | replace('LIVESTOCK_SPECIES_', '') | replace('LSTK_', '') | replace('LIVESTOCK_BREED_', '') | replace('BREED_CATTLE_', '') | replace('BREED_GOAT_', '') | replace('BREED_SHEEP_', '') | replace('BREED_CAMEL_', '') | replace('LIVESTOCK_DISEASE_', '') | replace('VACCINE_TYPE_', '') | replace('_', ' ') | title -}}
 {%- endmacro -%}
 
 {%- macro sex(value) -%}

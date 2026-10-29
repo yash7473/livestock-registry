@@ -63,6 +63,8 @@ def invalidate() -> None:
     _values_by_attribute = {}
     _values_expire_at = 0.0
     _values_loaded = False
+    _value_attributes.clear()
+    _value_attributes_expire_at.clear()
 
 
 async def _load_values() -> None:
@@ -153,9 +155,84 @@ async def display(value_id: str | None) -> str:
 
 
 async def parent(value_id: str | None) -> Optional[str]:
-    """parent_value_id of a value (a breed's species), None when unknown or none."""
+    """parent_value_id of a value, None when unknown or none."""
     entry = await get_value(value_id)
     return (entry or {}).get("parent_value_id") or None
+
+
+# list code -> {value code -> attributes}, from the catalogue API.
+_value_attributes: dict[str, dict[str, dict[str, Any]]] = {}
+_value_attributes_expire_at: dict[str, float] = {}
+_CATALOGUE_PAGE_SIZE = 500
+
+
+async def list_attributes(list_code: str | None) -> dict[str, dict[str, Any]]:
+    """{value code: catalogue attributes} for every value of one list, empty
+    when the list is unknown or Master Data cannot be read.
+
+    /attributes/get_attribute_values, which the platform and ``_load_values``
+    read, returns a value's code, label, parent and order only. A country
+    pack keeps a breed's or vaccine's species as a value attribute, which the
+    Master Data catalogue API (/catalogue/get_list_values) returns. A list is
+    fetched once and cached for the platform's Master Data cache lifetime.
+    """
+    if not list_code:
+        return {}
+    now = time.monotonic()
+    if list_code not in _value_attributes or now >= _value_attributes_expire_at.get(list_code, 0.0):
+        client = _client()
+        attributes: dict[str, dict[str, Any]] = {}
+        try:
+            if not client.is_configured(client._settings()):
+                return {}
+            for page in range(1, _ATTRIBUTE_MAX_PAGES + 1):
+                payload = await client._post(
+                    "/catalogue/get_list_values",
+                    payload={"list_code": list_code, "version": "latest", "include_retired": False},
+                    pagination={"current_page": page, "page_size": _CATALOGUE_PAGE_SIZE},
+                )
+                rows = payload.get("values") if isinstance(payload, dict) else None
+                for row in rows or []:
+                    code = row.get("value_code") or row.get("value_id")
+                    if code:
+                        attributes[code] = row.get("attributes") or {}
+                if not rows or len(rows) < _CATALOGUE_PAGE_SIZE:
+                    break
+        except Exception as exc:
+            _logger.warning("Master Data catalogue values unavailable for %s: %s", list_code, exc)
+            return {}
+        _value_attributes[list_code] = attributes
+        ttl = _ttl(client)
+        _value_attributes_expire_at[list_code] = now + (ttl if ttl > 0 else 300.0)
+    return _value_attributes.get(list_code, {})
+
+
+async def value_attributes(list_code: str | None, value_id: str | None) -> dict[str, Any]:
+    """The catalogue attributes of one value (e.g. a breed's or a vaccine's
+    ``species``), empty when the value or the list is unknown."""
+    if not value_id:
+        return {}
+    return dict((await list_attributes(list_code)).get(str(value_id).strip(), {}))
+
+
+async def species_has_values(list_code: str, species: str | None, same_species) -> bool:
+    """True when some value of ``list_code`` belongs to ``species`` (its
+    ``species`` attribute names the same type, compared with
+    ``same_species``). False when none does or the list cannot be read."""
+    if not species:
+        return False
+    return any(same_species(attrs.get("species"), species) for attrs in (await list_attributes(list_code)).values())
+
+
+async def species_of(value_id: str | None) -> Optional[str]:
+    """The species a breed or vaccine belongs to: its ``species`` attribute in
+    the catalogue, else its parent value (for lists that model the species as
+    the parent). None when the value names no species."""
+    entry = await get_value(value_id)
+    if not entry:
+        return None
+    attributes = await value_attributes(entry.get("attribute_id"), value_id)
+    return attributes.get("species") or entry.get("parent_value_id") or None
 
 
 _geo_label_cache: dict[str, str] = {}

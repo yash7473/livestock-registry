@@ -151,16 +151,18 @@ class G2PRegisterDomainServiceVaccination(AuditSnapshotMixin, G2PRegisterDomainS
 
         # The schedule seed is keyed by bare codes (vaccine_name "ANTHRAX_CATTLE",
         # species "CATTLE") while the form saves attribute value ids
-        # ("VACCINE_TYPE_ANTHRAX_CATTLE", "LIVESTOCK_SPECIES_CATTLE"). Compare
-        # both sides with the catalogue prefixes stripped so either spelling
-        # matches — without this the lookup never matched a real entry and
-        # next_due_date stayed NULL (no overdue flip, no due-soon/overdue mail).
+        # ("VACCINE_TYPE_ANTHRAX_CATTLE", species "LSTK_CATTLE", or a former
+        # "LIVESTOCK_SPECIES_CATTLE"). Compare both sides with the catalogue
+        # prefixes stripped so any spelling matches — without this the lookup
+        # never matched a real entry and next_due_date stayed NULL (no overdue
+        # flip, no due-soon/overdue mail). Chicken is the livestock type of what
+        # the schedule calls poultry.
         def norm(value) -> str:
             text = str(value or "").strip().upper()
-            for prefix in ("VACCINE_TYPE_", "LIVESTOCK_SPECIES_", "LIVESTOCK_VACCINE_"):
+            for prefix in ("VACCINE_TYPE_", "LIVESTOCK_SPECIES_", "LIVESTOCK_VACCINE_", "LSTK_"):
                 if text.startswith(prefix):
                     text = text[len(prefix):]
-            return text
+            return "POULTRY" if text == "CHICKEN" else text
 
         session_maker = async_sessionmaker(dbengine.get(), expire_on_commit=False)
         async with session_maker() as session:

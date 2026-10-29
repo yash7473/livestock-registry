@@ -56,7 +56,7 @@ def main():
         check(record["state"] == "DRAFT", f"{name}: livestock record state {record['state']!r}, expected DRAFT (the approval ladder starts there)", failures)
         for a in out["ls_animal_details"]:
             check("state" not in a, f"{name}: animal row carries a state ({a.get('state')!r})", failures)
-            check(a["species"].startswith("LIVESTOCK_SPECIES_"), f"{name}: species {a['species']!r}", failures)
+            check(a["species"].startswith("LSTK_"), f"{name}: species {a['species']!r} is not a LIVESTOCK_TYPE code", failures)
             check(a["gender"] in ("MALE", "FEMALE", "MIXED"), f"{name}: animal gender {a['gender']!r}", failures)
         for h in out["ls_health_event_details"]:
             d = h["disease_type"]

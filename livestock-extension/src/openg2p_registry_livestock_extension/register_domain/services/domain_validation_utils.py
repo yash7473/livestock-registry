@@ -409,7 +409,7 @@ async def get_animal_species_and_birth_date(ear_tag_id: str) -> tuple[str | None
 
 async def humanize_attribute_value(value_id: str | None) -> str:
     """The human-readable label for a code-list value id (e.g.
-    "LIVESTOCK_SPECIES_SHEEP" -> "Sheep"), for building a validation message
+    "LSTK_SHEEP" -> "SHEEP", a former "LIVESTOCK_SPECIES_SHEEP" likewise), for building a validation message
     a user can actually act on. Read from Master Data; falls back to the raw
     id if it isn't a known value (or is blank) — validation error text should
     never go silent just because a lookup came up empty.
@@ -417,13 +417,19 @@ async def humanize_attribute_value(value_id: str | None) -> str:
     if is_blank(value_id):
         return str(value_id)
     from ... import master_data_lists
+    from .species_codes import canonical
 
-    return await master_data_lists.display(str(value_id).strip())
+    value = str(value_id).strip()
+    label = await master_data_lists.display(value)
+    if label == value:
+        # A former species code is not in Master Data; label its type instead.
+        label = await master_data_lists.display(canonical(value))
+    return label
 
 
 async def get_species_config(species_value_id: str | None) -> tuple[bool, bool]:
-    """(requires_ear_tag, is_flock_species) for a LIVESTOCK_SPECIES value —
-    e.g. Poultry/Beehive vs. Cattle/Sheep/... — configurable per species from
+    """(requires_ear_tag, is_flock_species) for a species value (LIVESTOCK_TYPE,
+    or a former registry code) — e.g. Chicken vs. Cattle/Sheep/... — configurable per species from
     Configuration > Attributes > Species (an Edit Attribute Value's "Requires
     Ear Tag" / "Flock / Group Species" checkboxes), not a hardcoded species
     list in this codebase. Backed by G2PLivestockSpeciesConfig, a
@@ -448,9 +454,17 @@ async def get_species_config(species_value_id: str | None) -> tuple[bool, bool]:
 
     from ..models.species_config import G2PLivestockSpeciesConfig
 
+    from .species_codes import lookup_keys
+
     session_maker = async_sessionmaker(dbengine.get(), expire_on_commit=False)
     async with session_maker() as session:
-        config = await session.get(G2PLivestockSpeciesConfig, species_value_id)
+        # Config rows are keyed by species value id: the Master Data code
+        # first, then a former registry code an older row may be keyed by.
+        config = None
+        for key in lookup_keys(species_value_id):
+            config = await session.get(G2PLivestockSpeciesConfig, key)
+            if config is not None:
+                break
         if config is None:
             return requires_ear_tag, is_flock_species
         if config.requires_ear_tag is not None:
@@ -480,7 +494,9 @@ async def validate_species_matches(record: dict) -> None:
         # this check's job to also flag.
         return
 
-    if str(species).strip() != animal_species:
+    from .species_codes import same_species
+
+    if not same_species(species, animal_species):
         entered_label = await humanize_attribute_value(species)
         actual_label = await humanize_attribute_value(animal_species)
         validation_error(
@@ -736,15 +752,15 @@ async def validate_known_code(record: dict, field: str, attribute_id: str, label
 
 
 async def attribute_value_parent(value_id) -> str | None:
-    """parent_value_id of a code-list value (e.g. LIVESTOCK_BREED_BORAN ->
-    LIVESTOCK_SPECIES_CATTLE, VACCINE_TYPE_ANTHRAX_CATTLE ->
-    LIVESTOCK_SPECIES_CATTLE), read from Master Data. None when the value is
-    unknown or has no parent."""
+    """The species a breed or vaccine belongs to (e.g. BREED_CATTLE_BORAN ->
+    LSTK_CATTLE, VACCINE_TYPE_ANTHRAX_CATTLE -> LSTK_CATTLE): the value's
+    ``species`` attribute in the Master Data catalogue, or its parent value.
+    None when the value is unknown or names no species."""
     if is_blank(value_id):
         return None
     from ... import master_data_lists
 
-    return await master_data_lists.parent(str(value_id).strip())
+    return await master_data_lists.species_of(str(value_id).strip())
 
 
 async def validate_belongs_to_species(value_id, species, kind: str) -> None:
@@ -755,8 +771,10 @@ async def validate_belongs_to_species(value_id, species, kind: str) -> None:
     parent in the catalogue is left alone."""
     if is_blank(value_id) or is_blank(species):
         return
+    from .species_codes import same_species
+
     parent = await attribute_value_parent(value_id)
-    if parent is None or parent == str(species).strip():
+    if parent is None or same_species(parent, species):
         return
     value_label = await humanize_attribute_value(value_id)
     parent_label = await humanize_attribute_value(parent)

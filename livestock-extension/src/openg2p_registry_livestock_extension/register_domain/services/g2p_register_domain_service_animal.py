@@ -35,14 +35,10 @@ _ANIMAL_REGISTER_ID = "041a9f79-2142-548a-a15b-a4c76fc9f6f7"
 # g2p_livestock_registry/models/live_stock_registry_line.py.
 _EAR_TAG_PATTERN = re.compile(r"^ET\d{10}$")
 
-# The registry's own species values; see _validate_species_livestock.
-_SPECIES_PREFIX = "LIVESTOCK_SPECIES_"
-
 # Whether a species requires an ear tag, and whether it's recorded as a
 # flock/group rather than one row per individual, is NOT a hardcoded species
-# list here anymore — it's per-value config on the LIVESTOCK_SPECIES
-# attribute (Configuration > Attributes > Species > Edit > "Requires Ear
-# Tag" / "Flock / Group Species"), read live via get_species_config
+# list here anymore — it's per-value config keyed by the species value
+# (g2p_attribute_value_species_configs), read live via get_species_config
 # (domain_validation_utils.py, backed by G2PAttributeValueSpeciesConfig).
 # That keeps adding a new tagless/flock species (e.g. Duck, Rabbit) a
 # Configuration change, not a code change.
@@ -55,7 +51,8 @@ _SPECIES_PREFIX = "LIVESTOCK_SPECIES_"
 # see _validate_date_of_birth_required.
 _REQUIRED_FIELDS = {
     "species": "species",
-    "breed": "breed",
+    # breed: required only for a species that has breeds in the list; see
+    # _validate_breed_required.
     # Stays required for every species, no exception for a flock species —
     # unlike date_of_birth below, there's no per-field carve-out here: this
     # is G2R-135's mandatory constraint. GenderEnum.MIXED (models/enums.py)
@@ -74,6 +71,12 @@ _REQUIRED_FIELDS = {
 # importing ..models here would declare every table a second time (see
 # _extension_models in g2p_register_domain_service_livestock.py).
 _ANIMAL_SEX_VALUES = frozenset({"MALE", "FEMALE", "MIXED"})
+
+# Master Data lists the Livestock Details fields are bound to (section
+# metadata, widget-data-source attribute_id). The species is a livestock type,
+# the Gen1 list; a breed names its type in its species attribute.
+SPECIES_LIST = "LIVESTOCK_TYPE"
+BREED_LIST = "LIVESTOCK_BREED_NAME"
 
 
 class G2PRegisterDomainServiceAnimal(AuditSnapshotMixin, G2PRegisterDomainService):
@@ -112,12 +115,12 @@ class G2PRegisterDomainServiceAnimal(AuditSnapshotMixin, G2PRegisterDomainServic
             # "today" on the official staff-ui; resolve it before any check.
             resolve_today_default(record, "registration_date")
             self._validate_required_fields(record)
-            self._validate_species_livestock(record)
-            await validate_known_code(record, "species", "LIVESTOCK_SPECIES", "Species")
+            await validate_known_code(record, "species", SPECIES_LIST, "Species")
             requires_ear_tag, is_flock_species = await get_species_config(record.get("species"))
             # Breed is a plain (unfiltered) list in the dialog; keep a goat breed
             # off a cattle record here, server-side.
             await validate_belongs_to_species(record.get("breed"), record.get("species"), "Breed")
+            await self._validate_breed_required(record)
             await self._validate_breed_known(record)
             self._validate_identifier_required(record, requires_ear_tag)
             self._validate_gender_for_species(record, requires_ear_tag)
@@ -185,25 +188,27 @@ class G2PRegisterDomainServiceAnimal(AuditSnapshotMixin, G2PRegisterDomainServic
                 "has no ear to attach an ear tag to."
             )
 
-    def _validate_species_livestock(self, record: dict) -> None:
-        """The species must be one of the registry's own LIVESTOCK_SPECIES_*
-        values. Master Data is shared: on dev the same list also holds the
-        OpenG2P data pack's values (CATTLE, GOATS, SHEEP, ...), which have no
-        breeds, vaccines or species config here. The dialog hides them
-        (livestock-dialog-overlay.js); this is the same rule for API clients."""
-        species = record.get("species")
-        if not is_blank(species) and not str(species).startswith(_SPECIES_PREFIX):
-            validation_error(
-                f"Species '{species}' is not a species of this registry — "
-                "choose one from the Species list."
-            )
+    async def _validate_breed_required(self, record: dict) -> None:
+        """Breed is required when the breed list has breeds for the record's
+        species (cattle, goat, sheep, camel in the MoA list), and optional
+        otherwise (chicken, donkey, horse, mule have none), as breed was in
+        Gen1. Which species have breeds is read from Master Data, so adding
+        breeds for a species there makes breed required for it without a code
+        change. The form leaves breed optional and this check decides."""
+        if not is_blank(record.get("breed")) or is_blank(record.get("species")):
+            return
+        from ... import master_data_lists
+        from .species_codes import same_species
+
+        if await master_data_lists.species_has_values(BREED_LIST, record.get("species"), same_species):
+            validation_error("Please provide the breed before saving the record.")
 
     async def _validate_breed_known(self, record: dict) -> None:
-        """The breed must be a value of the Breed list. The dialog only offers
-        those; ODK, File Import and API rows can carry anything, and an
-        unknown breed was stored as typed."""
+        """The breed must be a value of the Breed list (LIVESTOCK_BREED_NAME).
+        The dialog only offers those; ODK, File Import and API rows can carry
+        anything, and an unknown breed was stored as typed."""
         breed = record.get("breed")
-        if not is_blank(breed) and not await attribute_value_known(breed, "LIVESTOCK_BREED"):
+        if not is_blank(breed) and not await attribute_value_known(breed, BREED_LIST):
             validation_error(f"Breed '{breed}' is not in the breed list.")
 
     def _validate_gender_for_species(self, record: dict, requires_ear_tag: bool) -> None:
